@@ -1,0 +1,6 @@
+// Octane Light Denoiser — US-English strings
+// (Menu/plugin name is set in code via RegisterCommandPlugin; table kept for
+//  future localized .res dialogs.)
+STRINGTABLE
+{
+}
