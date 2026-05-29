@@ -123,13 +123,16 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
     def _body_manage(self) -> None:
         if self.GroupBegin(0, c4d.BFH_SCALEFIT, cols=1):
             self.GroupBorderSpace(8, 6, 8, 4)
+            self.AddStaticText(0, c4d.BFH_SCALEFIT,
+                               name="Tick lights below → pick an ID → Assign.   (same ID = one combined pass)")
             self.AddCheckbox(ids.ID_MGR_USESCENE, c4d.BFH_SCALEFIT, 0, 0,
                              name="Use scene selection (Object Manager)")
             if self.GroupBegin(0, c4d.BFH_SCALEFIT, cols=5):
-                self.AddStaticText(0, c4d.BFH_LEFT, name="Assign →")
+                self.AddStaticText(0, c4d.BFH_LEFT, name="Assign to")
                 self.AddComboBox(ids.ID_MGR_IDCOMBO, c4d.BFH_LEFT, 70, 0)
                 for n in range(1, ids.MAX_LIGHT_IDS + 1):
                     self.AddChild(ids.ID_MGR_IDCOMBO, n, "ID %d" % n)
+                self.SetInt32(ids.ID_MGR_IDCOMBO, self._target_id)
                 self.AddButton(ids.ID_MGR_ASSIGN, c4d.BFH_LEFT, name="Assign")
                 self.AddButton(ids.ID_MGR_NEW, c4d.BFH_LEFT, name="+ New")
                 self.AddButton(ids.ID_MGR_CLEAR, c4d.BFH_LEFT, name="Clear")
@@ -168,7 +171,8 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
             self._mlight_index_map[ri] = li.key
             ri += 1
         if not self._scene_lights:
-            self.AddStaticText(0, c4d.BFH_SCALEFIT, name="No Octane lights found in the scene.")
+            self.AddStaticText(0, c4d.BFH_SCALEFIT,
+                               name="No lights found. Add a C4D/Octane light, then press Re-scan.")
 
         self.AddSeparatorH(0)
         self.AddStaticText(0, c4d.BFH_SCALEFIT, name="GROUPS → PASSES")

@@ -19,23 +19,64 @@ from .undo_helper import UndoSession
 
 # ============================================================ scene lights
 def get_scene_lights(doc: Any, probe: Any) -> List[LightInfo]:
-    """Every object carrying an Octane Light tag, with its current Pass ID."""
+    """Every light in the scene: native C4D lights (c4d.Olight) AND any object
+    carrying an Octane Light tag. The Octane Light tag (if present) holds the
+    Light Pass ID; for a plain C4D light the tag is created on first Assign.
+    """
     out: List[LightInfo] = []
     if doc is None:
         return out
     want = probe.lighttag_type()
     i = 0
     for obj in iter_objects(doc.GetFirstObject()):
-        tag = obj.GetFirstTag()
-        while tag:
-            if tag.GetType() == want:
-                i += 1
-                out.append(LightInfo(key="ML%d" % i, obj=obj, tag=tag,
-                                     name=obj.GetName(),
-                                     light_id=probe.read_light_pass_id(tag)))
+        # find an existing Octane Light tag (if any)
+        tag = None
+        t = obj.GetFirstTag()
+        while t:
+            if t.GetType() == want:
+                tag = t
                 break
-            tag = tag.GetNext()
+            t = t.GetNext()
+        # a "light" = native C4D light, or anything already wearing an Octane Light tag
+        is_light = tag is not None
+        if not is_light:
+            try:
+                is_light = bool(obj.CheckType(c4d.Olight))
+            except Exception:
+                is_light = (obj.GetType() == getattr(c4d, "Olight", 5102))
+        if not is_light:
+            continue
+        i += 1
+        out.append(LightInfo(key="ML%d" % i, obj=obj, tag=tag, name=obj.GetName(),
+                             light_id=(probe.read_light_pass_id(tag) if tag else None)))
     return out
+
+
+def _ensure_light_tag(doc: Any, probe: Any, li: LightInfo, undo: Any) -> Any:
+    """Return the light's Octane Light tag, creating + inserting it if missing."""
+    if li.tag is not None:
+        return li.tag
+    if li.obj is None:
+        return None
+    want = probe.lighttag_type()
+    t = li.obj.GetFirstTag()
+    while t:
+        if t.GetType() == want:
+            li.tag = t
+            return t
+        t = t.GetNext()
+    try:
+        tag = c4d.BaseTag(want)
+    except Exception as exc:  # noqa: BLE001
+        print("[OLD] could not create Octane Light tag (%s): %s" % (want, exc))
+        return None
+    if tag is None:
+        return None
+    li.obj.InsertTag(tag)
+    if undo is not None:
+        undo.record_new(tag)
+    li.tag = tag
+    return tag
 
 
 def selected_in_scene(doc: Any, lights: List[LightInfo]) -> set:
@@ -84,10 +125,11 @@ def assign_id_to(doc: Any, probe: Any, lights: List[LightInfo], target_id: int) 
     n = 0
     with UndoSession(doc, label="Assign Light ID %d" % target_id) as undo:
         for li in lights:
-            if li.tag is None:
+            tag = _ensure_light_tag(doc, probe, li, undo)   # create tag if missing
+            if tag is None:
                 continue
-            undo.record_change(li.tag)
-            if _write_pass_id(probe, li.tag, target_id):
+            undo.record_change(tag)
+            if _write_pass_id(probe, tag, target_id):
                 li.light_id = target_id
                 n += 1
     c4d.EventAdd()
@@ -115,14 +157,17 @@ def auto_assign_all(doc: Any, probe: Any, lights: List[LightInfo]) -> int:
     n, nid = 0, 1
     with UndoSession(doc, label="Auto-assign Light IDs") as undo:
         for li in lights:
-            if li.light_id is not None or li.tag is None:
+            if li.light_id is not None:
                 continue
             while nid in used and nid <= ids.MAX_LIGHT_IDS:
                 nid += 1
             if nid > ids.MAX_LIGHT_IDS:
                 break
-            undo.record_change(li.tag)
-            if _write_pass_id(probe, li.tag, nid):
+            tag = _ensure_light_tag(doc, probe, li, undo)
+            if tag is None:
+                continue
+            undo.record_change(tag)
+            if _write_pass_id(probe, tag, nid):
                 li.light_id = nid
                 used.add(nid)
                 n += 1
