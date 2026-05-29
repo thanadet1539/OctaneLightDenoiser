@@ -379,8 +379,12 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
     # ================================================================ chrome
     def _refresh_chrome(self) -> None:
         ready = self._phase == "ready"
-        self.SetString(ids.ID_STATUS_PILL,
-                       ("● Octane %s" % self._probe.version) if self._probe.available else "● Not found")
+        if self._probe.available:
+            v = self._probe.version
+            pill = ("● %s" % v) if "ctane" in v.lower() else ("● Octane %s" % v)
+        else:
+            pill = "● Not found"
+        self.SetString(ids.ID_STATUS_PILL, pill)
         self.SetString(ids.ID_SCAN_BTN, "Re-scan" if ready else "Scan scene")
         self.Enable(ids.ID_SCAN_BTN, self._probe.available)
         self.SetString(ids.ID_TAB_MANAGE, "● Manage" if self._tab == "manage" else "Manage")
@@ -627,6 +631,7 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
         if not self._probe.available:
             self._phase = "empty"
             self._rebuild_body()
+            gui.MessageDialog(self._probe.diagnostics())   # tell the user WHY
             return
         self._scene_lights = light_scanner.get_scene_lights(self._doc(), self._probe)
         self._group_names = {}

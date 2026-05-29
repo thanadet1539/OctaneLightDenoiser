@@ -58,39 +58,85 @@ class OctaneProbe:
 
     def __init__(self) -> None:
         self._mod: Any = None
+        self._vp_plugin: Any = None
         self._version: str = "unknown"
         self._passid_param = None        # cached resolved Light-tag pass-id param
-        self._load()
-        if self._mod is not None:
-            self._detect_version()
+        self._detect()
 
     # ----- discovery -----
-    def _load(self) -> None:
+    def _detect(self) -> None:
+        # (1) optional Python module — only used for symbol resolution/version.
+        #     Octane may NOT expose an importable `c4doctane`; that's fine.
         try:
             import c4doctane  # type: ignore
             self._mod = c4doctane
-            return
         except Exception:
-            pass
-        legacy = getattr(getattr(c4d, "modules", None), "octane", None)
-        if legacy is not None:
-            self._mod = legacy
+            self._mod = getattr(getattr(c4d, "modules", None), "octane", None)
 
-    def _detect_version(self) -> None:
-        for attr in ("__version__", "version", "OCTANE_VERSION", "VERSION"):
-            v = getattr(self._mod, attr, None)
-            if v:
-                self._version = str(v)
-                return
-        self._version = "detected"
+        # (2) plugin registry — the RELIABLE "is Octane installed" test. The
+        #     plugin runs off numeric IDs, so availability hinges on this, not
+        #     on the module import.
+        try:
+            fp = c4d.plugins.FindPlugin(ids.OCTANE_VIDEO_POST, c4d.PLUGINTYPE_VIDEOPOST)
+            if fp is None:
+                fp = c4d.plugins.FindPlugin(ids.OCTANE_VIDEO_POST)
+            self._vp_plugin = fp
+        except Exception:
+            self._vp_plugin = None
+
+        self._version = self._detect_version()
+
+    def _detect_version(self) -> str:
+        if self._vp_plugin is not None:
+            try:
+                nm = self._vp_plugin.GetName()
+                if nm:
+                    return nm
+            except Exception:
+                pass
+        if self._mod is not None:
+            for attr in ("__version__", "version", "OCTANE_VERSION", "VERSION"):
+                v = getattr(self._mod, attr, None)
+                if v:
+                    return str(v)
+        return "installed" if self.available else "unknown"
+
+    def _has_symbol(self) -> bool:
+        """Octane injects symbols into the c4d namespace; a present one => installed."""
+        return any(isinstance(getattr(c4d, n, None), int)
+                   for n in ("RNDAOV_LIGHT_ID", "VPocta"))
 
     @property
     def available(self) -> bool:
-        return self._mod is not None
+        return self._vp_plugin is not None or self._mod is not None or self._has_symbol()
 
     @property
     def version(self) -> str:
         return self._version
+
+    def diagnostics(self) -> str:
+        """Human-readable detection report (shown if Scan finds no Octane)."""
+        try:
+            fp = c4d.plugins.FindPlugin(ids.OCTANE_VIDEO_POST, c4d.PLUGINTYPE_VIDEOPOST)
+        except Exception:
+            fp = None
+        lines = [
+            "Octane detection report:",
+            "  c4doctane module : %s" % ("imported" if self._mod is not None else "not importable"),
+            "  VideoPost plugin %s : %s" % (
+                ids.OCTANE_VIDEO_POST,
+                ("found (%s)" % fp.GetName()) if fp is not None else "NOT registered"),
+            "  c4d Octane symbols : %s" % ("present" if self._has_symbol() else "absent"),
+            "  => available : %s   version : %s" % (self.available, self.version),
+        ]
+        if not self.available:
+            lines += [
+                "",
+                "Octane was not detected in this Cinema 4D.",
+                "Check that the Octane (c4doctane) plugin is installed AND enabled,",
+                "set the renderer to Octane in Render Settings, then re-open the panel.",
+            ]
+        return "\n".join(lines)
 
     # ----- symbol resolution -----
     def resolve(self, names: tuple, fallback: int) -> int:
