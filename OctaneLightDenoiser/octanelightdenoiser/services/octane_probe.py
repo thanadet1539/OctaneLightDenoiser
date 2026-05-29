@@ -244,6 +244,7 @@ class OctaneProbe:
                         safe_get(aov, ids.RNDAOV_LIGHT_ID),
                     ))
             self._dump_bc(vp, "VideoPost FULL (look for composite/Output-AOV base + name param)")
+            self._dump_shaders(vp)
 
         print(" Light-tag pass-id param resolved by name = %s  "
               "(0 = none; numeric guesses tried = %s)"
@@ -286,3 +287,33 @@ class OctaneProbe:
                     print("  [%s] = <unprintable>" % cid)
         except Exception as exc:  # noqa: BLE001
             print("  <iteration failed: %s>" % exc)
+
+    def _dump_shaders(self, vp: Any) -> None:
+        """Walk EVERY shader on the VideoPost — reveals composite / Output-AOV
+        and Open-Image-Denoiser nodes (the Tier-2 data we're missing).
+        Render-AOV nodes get a one-liner; any OTHER node type gets a full param
+        dump (that's the structure we need to wire OIDN automatically).
+        """
+        print("\n--- ALL shaders on VideoPost (Tier 2: composite / OIDN nodes) ---")
+        rp = self.renderpass_type()
+
+        def walk(sh: Any, depth: int = 0) -> None:
+            pad = "  " * depth
+            while sh is not None:
+                t = sh.GetType()
+                print("%s* type=%s name=%r" % (pad, t, sh.GetName()))
+                if t != rp:                       # unknown node -> full param dump
+                    bc = sh.GetDataInstance()
+                    if bc is not None:
+                        for cid, val in bc:
+                            try:
+                                print("%s    [%s]=%r" % (pad, cid, val))
+                            except Exception:
+                                pass
+                walk(sh.GetDown(), depth + 1)
+                sh = sh.GetNext()
+
+        try:
+            walk(vp.GetFirstShader())
+        except Exception as exc:  # noqa: BLE001
+            print("  <shader walk failed: %s>" % exc)
