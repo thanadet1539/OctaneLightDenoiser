@@ -29,11 +29,16 @@ _PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 
 
 class OctaneLightDenoiserDialog(gui.GeDialog):
-    def __init__(self) -> None:
+    def __init__(self, mode: str = "both") -> None:
         super().__init__()
+        self._mode = mode                   # "manage" | "build" | "both"
         self._probe = OctaneProbe()
         self._phase = "empty"               # empty | ready
-        self._tab = "manage"                # manage | build
+        self._tab = "build" if mode == "build" else "manage"
+        self._title = ids.PLUGIN_NAME_IDMGR if mode == "manage" else ids.PLUGIN_NAME
+        self._subtitle = ("Group lights by Light ID (same ID = one pass)"
+                          if mode == "manage"
+                          else "Per-light OIDN · auto-named EXR passes")
 
         self._scene_lights: List = []       # List[LightInfo]
         self._group_names: Dict[int, str] = {}
@@ -55,7 +60,7 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
 
     # ================================================================ layout
     def CreateLayout(self) -> bool:
-        self.SetTitle(ids.PLUGIN_NAME)
+        self.SetTitle(self._title)
         self._build_header()
         self.AddSeparatorH(0)
         self._build_tabbar()
@@ -79,9 +84,8 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
             self.GroupBorderSpace(8, 8, 8, 6)
             if self.GroupBegin(0, c4d.BFH_SCALEFIT, cols=2):
                 if self.GroupBegin(0, c4d.BFH_SCALEFIT, cols=1):
-                    self.AddStaticText(ids.ID_APPTITLE, c4d.BFH_SCALEFIT, name=ids.PLUGIN_NAME)
-                    self.AddStaticText(ids.ID_APPSUB, c4d.BFH_SCALEFIT,
-                                       name="Per-light OIDN · auto-named EXR passes")
+                    self.AddStaticText(ids.ID_APPTITLE, c4d.BFH_SCALEFIT, name=self._title)
+                    self.AddStaticText(ids.ID_APPSUB, c4d.BFH_SCALEFIT, name=self._subtitle)
                 self.GroupEnd()
                 self.AddStaticText(ids.ID_STATUS_PILL, c4d.BFH_RIGHT, name="")
             self.GroupEnd()
@@ -89,6 +93,8 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
         self.GroupEnd()
 
     def _build_tabbar(self) -> None:
+        if self._mode != "both":
+            return                          # single-purpose plugin: no tab bar
         if self.GroupBegin(ids.ID_TABBAR_GROUP, c4d.BFH_SCALEFIT, cols=2):
             self.GroupBorderSpace(8, 4, 8, 4)
             self.AddButton(ids.ID_TAB_MANAGE, c4d.BFH_SCALEFIT, name="Manage")
@@ -391,10 +397,11 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
         self.SetString(ids.ID_STATUS_PILL, pill)
         self.SetString(ids.ID_SCAN_BTN, "Re-scan" if ready else "Scan scene")
         self.Enable(ids.ID_SCAN_BTN, self._probe.available)
-        self.SetString(ids.ID_TAB_MANAGE, "● Manage" if self._tab == "manage" else "Manage")
-        self.SetString(ids.ID_TAB_BUILD, "● Build" if self._tab == "build" else "Build")
-        self.Enable(ids.ID_TAB_MANAGE, ready)
-        self.Enable(ids.ID_TAB_BUILD, ready)
+        if self._mode == "both":
+            self.SetString(ids.ID_TAB_MANAGE, "● Manage" if self._tab == "manage" else "Manage")
+            self.SetString(ids.ID_TAB_BUILD, "● Build" if self._tab == "build" else "Build")
+            self.Enable(ids.ID_TAB_MANAGE, ready)
+            self.Enable(ids.ID_TAB_BUILD, ready)
         if self._probe.available:
             self.SetString(ids.ID_EMPTY_TEXT,
                            "No scene scanned yet.\n\nPress 'Scan scene' to detect lights and passes.")

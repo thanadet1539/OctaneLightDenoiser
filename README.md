@@ -1,8 +1,10 @@
-# Octane Light Denoiser
+# ZHiCK Tool — Octane Light Denoiser
 
-A Cinema 4D plugin that automates Octane's **per-light OIDN denoise** workflow:
-group lights by Light Pass ID, pick the passes you want, and build Octane Render
-AOVs with auto-named EXR layers — in a few clicks.
+Two Cinema 4D plugins that automate Octane's **per-light OIDN denoise** workflow.
+After installing, both appear under **Extensions ▸ ZHiCK Tool**:
+
+- **Octane Light ID Manager** — group lights by Light Pass ID (same ID = one pass)
+- **Octane Light Denoiser** — pick passes, auto-name them, and build Octane Render AOVs
 
 ## Install — Windows (one line)
 
@@ -12,9 +14,9 @@ Open **PowerShell** and run:
 powershell -ep bypass -c "iwr -useb https://raw.githubusercontent.com/thanadet1539/OctaneLightDenoiser/main/web_install.ps1 | iex"
 ```
 
-It downloads this repo and copies the plugin into your Cinema 4D plugins folder
-(no git client needed). Then **restart Cinema 4D → Extensions → Octane Light Denoiser**.
-Run the same command again any time to update.
+It downloads this repo and copies the plugins into your Cinema 4D plugins folder
+(no git client needed). Then **restart Cinema 4D → Extensions ▸ ZHiCK Tool**
+(Light ID Manager + Light Denoiser). Run the same command again any time to update.
 
 ## Install — clone
 

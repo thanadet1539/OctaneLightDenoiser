@@ -9,9 +9,12 @@ Keeping every ID here means a fix is a one-line edit.
 from __future__ import annotations
 
 # ===================================================================== plugin
-PLUGIN_ID: int = 1057248      # PLACEHOLDER — request a real ID from
-                              # https://plugincafe.maxon.net before release.
+PLUGIN_ID: int = 1057248          # Octane Light Denoiser — PLACEHOLDER (request real
+                                  # IDs from https://plugincafe.maxon.net before release)
 PLUGIN_NAME: str = "Octane Light Denoiser"
+PLUGIN_ID_IDMGR: int = 1057249    # Octane Light ID Manager — PLACEHOLDER
+PLUGIN_NAME_IDMGR: str = "Octane Light ID Manager"
+MENU_TITLE: str = "ZHiCK Tool"    # Extensions submenu both commands live under
 
 # ============================================================ Octane handles
 OCTANE_VIDEO_POST: int     = 1029525   # renderer VideoPost (host of all AOVs)
