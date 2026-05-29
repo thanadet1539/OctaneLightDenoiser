@@ -142,7 +142,10 @@ ID_INSPECTOR   = 1036
 ID_TABBAR_GROUP = 1040
 ID_TAB_MANAGE   = 1041
 ID_TAB_BUILD    = 1042
-ID_BODY         = 1043     # flushable body; content depends on the active tab
+ID_BODY         = 1043     # content container (holds the 3 pages below)
+ID_EMPTY_PAGE   = 1044     # page groups — built ONCE, toggled via HideElement
+ID_MANAGE_PAGE  = 1045     # (so their control gadgets stay clickable; only the
+ID_BUILD_PAGE   = 1046     #  inner list groups are flushed for dynamic content)
 
 # -- Manage-tab controls --
 ID_MGR_USESCENE = 1050

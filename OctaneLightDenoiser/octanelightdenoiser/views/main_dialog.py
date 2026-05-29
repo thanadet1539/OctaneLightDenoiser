@@ -1,13 +1,15 @@
 """OctaneLightDenoiserDialog — the main panel (Manage / Build tabs).
 
-Manage tab  : Light ID Manager — select lights (scene OM selection or in-panel
-              checkboxes) and assign/group them by Light Pass ID. Lights sharing
-              an ID = one group = one combined Light pass.
-Build tab   : the pass picker — one row per light *group* (+ Sun/Env) + standard
-              passes, with auto/manual output names, validation, and Build.
+Layout strategy (important): ALL control gadgets (buttons, checkboxes, combo,
+search) are created ONCE in CreateLayout and stay put — only the two scrollable
+list groups (ID_MGR_LIST, ID_LIST_GROUP) are flushed/rebuilt for dynamic
+content. Tabs/phases are switched with HideElement. This is the C4D-proven
+pattern; flushing a whole group that contains controls can leave those controls
+visible-but-unclickable.
 
-Native C4D GeDialog widgets: faithful structure/behaviour/state; C4D can't do
-the mockup's gradients/green button so chrome uses the native dark theme.
+Manage tab  : Light ID Manager — select lights (panel checkboxes or OM scene
+              selection), Assign/group them by Light Pass ID (same ID = one pass).
+Build tab   : pick passes (light groups + standard) → auto/manual names → Build.
 """
 from __future__ import annotations
 
@@ -33,14 +35,12 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
         self._phase = "empty"               # empty | ready
         self._tab = "manage"                # manage | build
 
-        # manage-tab state
         self._scene_lights: List = []       # List[LightInfo]
         self._group_names: Dict[int, str] = {}
-        self._mlight_selected: set = set()  # in-panel selected light keys
+        self._mlight_selected: set = set()
         self._use_scene = False
         self._target_id = 1
 
-        # build-tab state
         self._items: List[PassItem] = []
         self._state: Dict[str, RowState] = {}
         self._collapsed: Dict[str, bool] = {
@@ -48,7 +48,6 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
         }
         self._query = ""
 
-        # rebuilt each layout
         self._row_index_map: Dict[int, str] = {}
         self._mlight_index_map: Dict[int, str] = {}
         self._group_index_map: Dict[int, int] = {}
@@ -61,8 +60,11 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
         self.AddSeparatorH(0)
         self._build_tabbar()
         if self.GroupBegin(ids.ID_BODY, c4d.BFH_SCALEFIT | c4d.BFV_SCALEFIT, cols=1):
-            self._populate_body()
+            self._build_empty_page()
+            self._build_manage_page()
+            self._build_build_page()
         self.GroupEnd()
+        self._show_page()
         self._apply_values()
         self._refresh_chrome()
         return True
@@ -94,66 +96,87 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
         self.GroupEnd()
         self.AddSeparatorH(0)
 
-    # ================================================================ body
-    def _populate_body(self) -> None:
-        if self._phase != "ready":
-            self._body_empty()
-        elif self._tab == "manage":
-            self._body_manage()
-        else:
-            self._body_build()
-
-    def _rebuild_body(self) -> None:
-        self.LayoutFlushGroup(ids.ID_BODY)
-        self._populate_body()
-        self.LayoutChanged(ids.ID_BODY)
-        self._apply_values()
-        self._refresh_chrome()
-
-    def _body_empty(self) -> None:
-        if self._probe.available:
-            msg = ("No scene scanned yet.\n\nScan to detect lights and the "
-                   "standard render passes you can denoise.")
-        else:
-            msg = ("Octane not detected.\n\nThis plugin needs c4doctane 2024.1+. "
-                   "Enable it, then re-open this panel.")
-        self.AddStaticText(ids.ID_EMPTY_TEXT, c4d.BFH_SCALEFIT, name=msg)
-
-    # ---------------------------------------------------------------- manage
-    def _body_manage(self) -> None:
-        if self.GroupBegin(0, c4d.BFH_SCALEFIT, cols=1):
-            self.GroupBorderSpace(8, 6, 8, 4)
-            self.AddStaticText(0, c4d.BFH_SCALEFIT,
-                               name="Tick lights below → pick an ID → Assign.   (same ID = one combined pass)")
-            self.AddCheckbox(ids.ID_MGR_USESCENE, c4d.BFH_SCALEFIT, 0, 0,
-                             name="Use scene selection (Object Manager)")
-            if self.GroupBegin(0, c4d.BFH_SCALEFIT, cols=5):
-                self.AddStaticText(0, c4d.BFH_LEFT, name="Assign to")
-                self.AddComboBox(ids.ID_MGR_IDCOMBO, c4d.BFH_LEFT, 70, 0)
-                for n in range(1, ids.MAX_LIGHT_IDS + 1):
-                    self.AddChild(ids.ID_MGR_IDCOMBO, n, "ID %d" % n)
-                self.SetInt32(ids.ID_MGR_IDCOMBO, self._target_id)
-                self.AddButton(ids.ID_MGR_ASSIGN, c4d.BFH_LEFT, name="Assign")
-                self.AddButton(ids.ID_MGR_NEW, c4d.BFH_LEFT, name="+ New")
-                self.AddButton(ids.ID_MGR_CLEAR, c4d.BFH_LEFT, name="Clear")
-            self.GroupEnd()
-            if self.GroupBegin(0, c4d.BFH_SCALEFIT, cols=3):
-                self.AddButton(ids.ID_MGR_SELALL, c4d.BFH_LEFT, name="Select all")
-                self.AddButton(ids.ID_MGR_SELNONE, c4d.BFH_LEFT, name="Select none")
-                self.AddButton(ids.ID_MGR_AUTO, c4d.BFH_RIGHT, name="Auto-assign all")
-            self.GroupEnd()
-            self.AddStaticText(ids.ID_MGR_STATUS, c4d.BFH_SCALEFIT, name="")
+    # ---- pages (built once; toggled with HideElement) ----
+    def _build_empty_page(self) -> None:
+        if self.GroupBegin(ids.ID_EMPTY_PAGE, c4d.BFH_SCALEFIT | c4d.BFV_SCALEFIT, cols=1):
+            self.GroupBorderSpace(12, 12, 12, 12)
+            self.AddStaticText(ids.ID_EMPTY_TEXT, c4d.BFH_SCALEFIT, name="")
         self.GroupEnd()
-        self.AddSeparatorH(0)
 
-        if self.ScrollGroupBegin(ids.ID_MGR_SCROLL, c4d.BFH_SCALEFIT | c4d.BFV_SCALEFIT,
-                                 c4d.SCROLLGROUP_VERT):
-            if self.GroupBegin(ids.ID_MGR_LIST, c4d.BFH_SCALEFIT | c4d.BFV_SCALEFIT, cols=1):
-                self.GroupBorderSpace(6, 6, 6, 6)
-                self._build_manage_rows()
+    def _build_manage_page(self) -> None:
+        if self.GroupBegin(ids.ID_MANAGE_PAGE, c4d.BFH_SCALEFIT | c4d.BFV_SCALEFIT, cols=1):
+            # --- controls (static) ---
+            if self.GroupBegin(0, c4d.BFH_SCALEFIT, cols=1):
+                self.GroupBorderSpace(8, 6, 8, 4)
+                self.AddStaticText(0, c4d.BFH_SCALEFIT,
+                                   name="Tick lights below → pick an ID → Assign.   (same ID = one combined pass)")
+                self.AddCheckbox(ids.ID_MGR_USESCENE, c4d.BFH_SCALEFIT, 0, 0,
+                                 name="Use scene selection (Object Manager)")
+                if self.GroupBegin(0, c4d.BFH_SCALEFIT, cols=5):
+                    self.AddStaticText(0, c4d.BFH_LEFT, name="Assign to")
+                    self.AddComboBox(ids.ID_MGR_IDCOMBO, c4d.BFH_LEFT, 70, 0)
+                    for n in range(1, ids.MAX_LIGHT_IDS + 1):
+                        self.AddChild(ids.ID_MGR_IDCOMBO, n, "ID %d" % n)
+                    self.AddButton(ids.ID_MGR_ASSIGN, c4d.BFH_LEFT, name="Assign")
+                    self.AddButton(ids.ID_MGR_NEW, c4d.BFH_LEFT, name="+ New")
+                    self.AddButton(ids.ID_MGR_CLEAR, c4d.BFH_LEFT, name="Clear")
+                self.GroupEnd()
+                if self.GroupBegin(0, c4d.BFH_SCALEFIT, cols=3):
+                    self.AddButton(ids.ID_MGR_SELALL, c4d.BFH_LEFT, name="Select all")
+                    self.AddButton(ids.ID_MGR_SELNONE, c4d.BFH_LEFT, name="Select none")
+                    self.AddButton(ids.ID_MGR_AUTO, c4d.BFH_RIGHT, name="Auto-assign all")
+                self.GroupEnd()
+                self.AddStaticText(ids.ID_MGR_STATUS, c4d.BFH_SCALEFIT, name="")
             self.GroupEnd()
-        self.ScrollGroupEnd()
+            self.AddSeparatorH(0)
+            # --- list (flushable inner group) ---
+            if self.ScrollGroupBegin(ids.ID_MGR_SCROLL, c4d.BFH_SCALEFIT | c4d.BFV_SCALEFIT,
+                                     c4d.SCROLLGROUP_VERT):
+                if self.GroupBegin(ids.ID_MGR_LIST, c4d.BFH_SCALEFIT | c4d.BFV_SCALEFIT, cols=1):
+                    self.GroupBorderSpace(6, 6, 6, 6)
+                self.GroupEnd()
+            self.ScrollGroupEnd()
+        self.GroupEnd()
 
+    def _build_build_page(self) -> None:
+        if self.GroupBegin(ids.ID_BUILD_PAGE, c4d.BFH_SCALEFIT | c4d.BFV_SCALEFIT, cols=1):
+            # --- toolbar (static) ---
+            if self.GroupBegin(0, c4d.BFH_SCALEFIT, cols=4):
+                self.GroupBorderSpace(8, 4, 8, 4)
+                self.AddButton(ids.ID_SEL_ALL, c4d.BFH_LEFT, name="All")
+                self.AddButton(ids.ID_SEL_NONE, c4d.BFH_LEFT, name="None")
+                self.AddButton(ids.ID_AUTONAME_ALL, c4d.BFH_LEFT, name="Auto-name")
+                self.AddEditText(ids.ID_SEARCH, c4d.BFH_SCALEFIT)
+            self.GroupEnd()
+            self.AddSeparatorH(0)
+            # --- list (flushable inner group) ---
+            if self.ScrollGroupBegin(ids.ID_LIST_SCROLL, c4d.BFH_SCALEFIT | c4d.BFV_SCALEFIT,
+                                     c4d.SCROLLGROUP_VERT):
+                if self.GroupBegin(ids.ID_LIST_GROUP, c4d.BFH_SCALEFIT | c4d.BFV_SCALEFIT, cols=1):
+                    self.GroupBorderSpace(6, 6, 6, 6)
+                self.GroupEnd()
+            self.ScrollGroupEnd()
+            self.AddSeparatorH(0)
+            # --- footer (static) ---
+            if self.GroupBegin(0, c4d.BFH_SCALEFIT, cols=1):
+                self.GroupBorderSpace(8, 6, 8, 8)
+                if self.GroupBegin(0, c4d.BFH_SCALEFIT, cols=2):
+                    self.AddButton(ids.ID_SETUP_EXR, c4d.BFH_SCALEFIT, name="Setup EXR")
+                    self.AddButton(ids.ID_INSPECTOR, c4d.BFH_SCALEFIT, name="Inspector")
+                self.GroupEnd()
+                self.AddButton(ids.ID_BUILD, c4d.BFH_SCALEFIT, name="Build Denoise")
+                self.AddStaticText(ids.ID_FOOT_STATUS, c4d.BFH_SCALEFIT, name="")
+            self.GroupEnd()
+        self.GroupEnd()
+
+    def _show_page(self) -> None:
+        ready = self._phase == "ready"
+        self.HideElement(ids.ID_EMPTY_PAGE, ready)
+        self.HideElement(ids.ID_MANAGE_PAGE, not (ready and self._tab == "manage"))
+        self.HideElement(ids.ID_BUILD_PAGE, not (ready and self._tab == "build"))
+        self.LayoutChanged(ids.ID_BODY)
+
+    # ================================================================ list builders
     def _build_manage_rows(self) -> None:
         self._mlight_index_map = {}
         self._group_index_map = {}
@@ -165,8 +188,7 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
                 self.AddCheckbox(ids.mlight_id(ri, ids.MROW_OFF_CHK),
                                  c4d.BFH_SCALEFIT, 0, 0, name=li.name)
                 tag = ("ID %d" % li.light_id) if isinstance(li.light_id, int) else "—  no ID"
-                self.AddStaticText(ids.mlight_id(ri, ids.MROW_OFF_INFO),
-                                   c4d.BFH_RIGHT, name=tag)
+                self.AddStaticText(ids.mlight_id(ri, ids.MROW_OFF_INFO), c4d.BFH_RIGHT, name=tag)
             self.GroupEnd()
             self._mlight_index_map[ri] = li.key
             ri += 1
@@ -195,49 +217,10 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
         unassigned = [li.name for li in self._scene_lights if not isinstance(li.light_id, int)]
         if unassigned:
             self.AddStaticText(0, c4d.BFH_SCALEFIT, name="⚠ Unassigned: " + ", ".join(unassigned))
-        self.AddStaticText(0, c4d.BFH_SCALEFIT,
-                           name="(Tip: lights sharing an ID = one combined pass. Name each group above.)")
-
-    def _group_name_for(self, gid: int) -> str:
-        # Neutral default ("Light <id>") — the user names groups themselves;
-        # we don't borrow the light's object name (Key/Rim/Fill, etc.).
-        name = self._group_names.get(gid, "")
-        return name.strip() if name.strip() else "Light %d" % gid
-
-    # ---------------------------------------------------------------- build
-    def _body_build(self) -> None:
-        if self.GroupBegin(0, c4d.BFH_SCALEFIT, cols=4):
-            self.GroupBorderSpace(8, 4, 8, 4)
-            self.AddButton(ids.ID_SEL_ALL, c4d.BFH_LEFT, name="All")
-            self.AddButton(ids.ID_SEL_NONE, c4d.BFH_LEFT, name="None")
-            self.AddButton(ids.ID_AUTONAME_ALL, c4d.BFH_LEFT, name="Auto-name")
-            self.AddEditText(ids.ID_SEARCH, c4d.BFH_SCALEFIT)
-        self.GroupEnd()
-        self.AddSeparatorH(0)
-
-        if self.ScrollGroupBegin(ids.ID_LIST_SCROLL, c4d.BFH_SCALEFIT | c4d.BFV_SCALEFIT,
-                                 c4d.SCROLLGROUP_VERT):
-            if self.GroupBegin(ids.ID_LIST_GROUP, c4d.BFH_SCALEFIT | c4d.BFV_SCALEFIT, cols=1):
-                self.GroupBorderSpace(6, 6, 6, 6)
-                self._build_rows()
-            self.GroupEnd()
-        self.ScrollGroupEnd()
-        self.AddSeparatorH(0)
-
-        if self.GroupBegin(0, c4d.BFH_SCALEFIT, cols=1):
-            self.GroupBorderSpace(8, 6, 8, 8)
-            if self.GroupBegin(0, c4d.BFH_SCALEFIT, cols=2):
-                self.AddButton(ids.ID_SETUP_EXR, c4d.BFH_SCALEFIT, name="Setup EXR")
-                self.AddButton(ids.ID_INSPECTOR, c4d.BFH_SCALEFIT, name="Inspector")
-            self.GroupEnd()
-            self.AddButton(ids.ID_BUILD, c4d.BFH_SCALEFIT, name="Build Denoise")
-            self.AddStaticText(ids.ID_FOOT_STATUS, c4d.BFH_SCALEFIT, name="")
-        self.GroupEnd()
 
     def _build_rows(self) -> None:
         self._row_index_map = {}
         self._recompute_validation()
-
         q = self._query.strip().lower()
         ri = 0
         for cat, label in ids.GROUPS:
@@ -245,10 +228,7 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
             if not rows:
                 continue
             sel = sum(1 for it in rows if self._state[it.id].selected)
-            # Force-expand a category that hides a selected row with an error,
-            # so a Build-blocking name issue is always visible to fix.
-            has_err = any(self._state[it.id].selected and self._state[it.id].error
-                          for it in rows)
+            has_err = any(self._state[it.id].selected and self._state[it.id].error for it in rows)
             collapsed = self._collapsed.get(cat, False) and not q and not has_err
             tri = "▸" if collapsed else "▾"
             self.AddButton(ids.group_head_id(self._cat_index[cat]), c4d.BFH_SCALEFIT,
@@ -258,6 +238,8 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
             for it in rows:
                 self._build_row(ri, it)
                 ri += 1
+        if not self._items:
+            self.AddStaticText(0, c4d.BFH_SCALEFIT, name="Nothing to build yet — scan the scene.")
 
     def _build_row(self, ri: int, it: PassItem) -> None:
         st = self._state[it.id]
@@ -322,14 +304,34 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
         st = self._state.get(it.id)
         return bool(st and q in st.name.lower())
 
+    def _group_name_for(self, gid: int) -> str:
+        name = self._group_names.get(gid, "")
+        return name.strip() if name.strip() else "Light %d" % gid
+
+    # ================================================================ list rebuilds
+    def _rebuild_manage_list(self) -> None:
+        if self._phase != "ready":
+            return
+        self.LayoutFlushGroup(ids.ID_MGR_LIST)
+        self._build_manage_rows()
+        self.LayoutChanged(ids.ID_MGR_LIST)
+        self._apply_manage_values()
+
+    def _rebuild_build_list(self) -> None:
+        if self._phase != "ready":
+            return
+        self.LayoutFlushGroup(ids.ID_LIST_GROUP)
+        self._build_rows()
+        self.LayoutChanged(ids.ID_LIST_GROUP)
+        self._apply_build_values()
+        self._refresh_chrome()
+
     # ================================================================ values
     def _apply_values(self) -> None:
         if self._phase != "ready":
             return
-        if self._tab == "manage":
-            self._apply_manage_values()
-        else:
-            self._apply_build_values()
+        self._apply_manage_values()
+        self._apply_build_values()
 
     def _apply_manage_values(self) -> None:
         self.SetInt32(ids.ID_MGR_IDCOMBO, self._target_id)
@@ -342,8 +344,6 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
             self.Enable(ids.mlight_id(ri, ids.MROW_OFF_CHK), not self._use_scene)
         for ri, gid in self._group_index_map.items():
             self.SetString(ids.group_row_id(ri, ids.GROW_OFF_NAME), self._group_name_for(gid))
-        # In scene-selection mode the list checkboxes are read-only, so the
-        # in-panel Select all/none don't apply — disable them to avoid dead clicks.
         self.Enable(ids.ID_MGR_SELALL, not self._use_scene)
         self.Enable(ids.ID_MGR_SELNONE, not self._use_scene)
 
@@ -395,18 +395,23 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
         self.SetString(ids.ID_TAB_BUILD, "● Build" if self._tab == "build" else "Build")
         self.Enable(ids.ID_TAB_MANAGE, ready)
         self.Enable(ids.ID_TAB_BUILD, ready)
+        if self._probe.available:
+            self.SetString(ids.ID_EMPTY_TEXT,
+                           "No scene scanned yet.\n\nPress 'Scan scene' to detect lights and passes.")
+        else:
+            self.SetString(ids.ID_EMPTY_TEXT,
+                           "Octane not detected.\n\nEnable c4doctane 2024.1+, set the renderer to "
+                           "Octane in Render Settings, then re-open this panel.")
 
-        if ready and self._tab == "build":
-            sel, err = self._counts()
-            self.Enable(ids.ID_BUILD, sel > 0 and err == 0)
-            if err > 0:
-                self.SetString(ids.ID_FOOT_STATUS, "⚠ %d name%s need fixing" % (err, "s" if err > 1 else ""))
-            elif sel == 0:
-                self.SetString(ids.ID_FOOT_STATUS, "Select at least one pass to build")
-            else:
-                self.SetString(ids.ID_FOOT_STATUS, "✓ %d pass%s ready" % (sel, "es" if sel > 1 else ""))
-        elif ready and self._tab == "manage":
-            self._update_manage_status()
+        sel, err = self._counts()
+        self.Enable(ids.ID_BUILD, ready and sel > 0 and err == 0)
+        if err > 0:
+            self.SetString(ids.ID_FOOT_STATUS, "⚠ %d name%s need fixing" % (err, "s" if err > 1 else ""))
+        elif sel == 0:
+            self.SetString(ids.ID_FOOT_STATUS, "Select at least one pass to build")
+        else:
+            self.SetString(ids.ID_FOOT_STATUS, "✓ %d pass%s ready" % (sel, "es" if sel > 1 else ""))
+        self._update_manage_status()
 
     def _update_manage_status(self) -> None:
         if self._use_scene:
@@ -420,6 +425,17 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
 
     # ================================================================ commands
     def Command(self, cid: int, msg: c4d.BaseContainer) -> bool:
+        # Robust dispatch: a handler exception must never silently "kill" a
+        # button. The console line confirms Command fires + surfaces tracebacks.
+        try:
+            print("[OLD] click id=%s  tab=%s  phase=%s" % (cid, self._tab, self._phase))
+            self._dispatch(cid)
+        except Exception:
+            import traceback
+            print("[OLD] Command(%s) FAILED:\n%s" % (cid, traceback.format_exc()))
+        return True
+
+    def _dispatch(self, cid: int) -> None:
         if cid == ids.ID_SCAN_BTN:
             self._do_scan()
         elif cid == ids.ID_TAB_MANAGE:
@@ -429,7 +445,8 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
         # ----- manage controls -----
         elif cid == ids.ID_MGR_USESCENE:
             self._use_scene = self.GetBool(cid)
-            self._rebuild_body()
+            self._apply_manage_values()
+            self._update_manage_status()
         elif cid == ids.ID_MGR_IDCOMBO:
             self._target_id = self.GetInt32(cid) or 1
         elif cid == ids.ID_MGR_ASSIGN:
@@ -453,7 +470,7 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
             self._auto_name_all()
         elif cid == ids.ID_SEARCH:
             self._query = self.GetString(ids.ID_SEARCH) or ""
-            self._rebuild_list()
+            self._rebuild_build_list()
         elif cid == ids.ID_SETUP_EXR:
             self.SetString(ids.ID_FOOT_STATUS, output_setup.setup_exr(self._doc(), self._probe))
         elif cid == ids.ID_INSPECTOR:
@@ -469,27 +486,19 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
             self._on_mlight(cid)
         elif ids.is_group_row(cid):
             self._on_group_row(cid)
-        return True
 
     @staticmethod
     def _doc():
         return c4d.documents.GetActiveDocument()
 
     def _switch_tab(self, tab: str) -> None:
-        if tab != self._tab and self._phase == "ready":
-            self._tab = tab
-            self._rebuild_body()
-
-    # ----- build-tab live updates -----
-    def _rebuild_list(self) -> None:
-        if self._tab != "build" or self._phase != "ready":
+        if self._phase != "ready":
             return
-        self.LayoutFlushGroup(ids.ID_LIST_GROUP)
-        self._build_rows()
-        self.LayoutChanged(ids.ID_LIST_GROUP)
-        self._apply_build_values()
+        self._tab = tab
+        self._show_page()
         self._refresh_chrome()
 
+    # ----- build-tab handlers -----
     def _on_row_widget(self, cid: int) -> None:
         ri, off = ids.decode_row_widget(cid)
         pid = self._row_index_map.get(ri)
@@ -501,48 +510,39 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
             return
         if off == ids.ROW_OFF_CHK:
             st.selected = self.GetBool(cid)
-            self._rebuild_list()
+            self._rebuild_build_list()
         elif off == ids.ROW_OFF_NAME:
             st.name = self.GetString(cid) or ""
             st.auto = (st.name == naming.auto_name(it.source))
-            self._rebuild_list()
+            self._rebuild_build_list()
         elif off == ids.ROW_OFF_ACTION:
             if st.error and st.fixable:
                 st.name = naming.sanitize(st.name)
             elif not st.auto:
                 st.name = naming.auto_name(it.source)
                 st.auto = True
-            self._rebuild_list()
+            self._rebuild_build_list()
 
     def _toggle_group(self, group_index: int) -> None:
         cat = next((c for c, i in self._cat_index.items() if i == group_index), None)
         if cat is not None:
             self._collapsed[cat] = not self._collapsed.get(cat, False)
-            self._rebuild_list()
+            self._rebuild_build_list()
 
     def _select_all(self, value: bool) -> None:
         for it in self._items:
             if not it.disabled:
                 self._state[it.id].selected = value
-        self._rebuild_list()
+        self._rebuild_build_list()
 
     def _auto_name_all(self) -> None:
         for it in self._items:
             st = self._state[it.id]
             st.name = naming.auto_name(it.source)
             st.auto = True
-        self._rebuild_list()
+        self._rebuild_build_list()
 
-    # ----- manage-tab live updates -----
-    def _rebuild_manage(self) -> None:
-        if self._tab != "manage" or self._phase != "ready":
-            return
-        self.LayoutFlushGroup(ids.ID_MGR_LIST)
-        self._build_manage_rows()
-        self.LayoutChanged(ids.ID_MGR_LIST)
-        self._apply_manage_values()
-        self._refresh_chrome()
-
+    # ----- manage-tab handlers -----
     def _effective_lights(self) -> List:
         if self._use_scene:
             keys = light_scanner.selected_in_scene(self._doc(), self._scene_lights)
@@ -561,7 +561,7 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
             else:
                 default_sel = (it.cat == "LIGHT" and isinstance(it.light_id, int)) or it.required
                 st = RowState(selected=default_sel, name=naming.auto_name(it.source), auto=True)
-            if st.auto:                       # keep auto name in sync with source/group rename
+            if st.auto:
                 st.name = naming.auto_name(it.source)
             new[it.id] = st
         self._state = new
@@ -584,16 +584,21 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
             return
         self._group_names[gid] = self.GetString(cid) or ""
         self._refresh_items()
-        self._rebuild_manage()
+        self._rebuild_manage_list()
+        self._rebuild_build_list()
+
+    def _after_group_change(self) -> None:
+        self._refresh_items()
+        self._rebuild_manage_list()
+        self._rebuild_build_list()
 
     def _assign(self) -> None:
         lights = self._effective_lights()
         if not lights:
-            gui.MessageDialog("Select one or more lights first (scene or list).")
+            gui.MessageDialog("Select one or more lights first (tick them, or use scene selection).")
             return
         n = light_scanner.assign_id_to(self._doc(), self._probe, lights, self._target_id)
-        self._refresh_items()
-        self._rebuild_manage()
+        self._after_group_change()
         self.SetString(ids.ID_MGR_STATUS,
                        "Assigned ID %d to %d light%s" % (self._target_id, n, "s" if n != 1 else ""))
 
@@ -611,38 +616,38 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
             gui.MessageDialog("Select one or more lights first.")
             return
         n = light_scanner.clear_ids(self._doc(), self._probe, lights)
-        self._refresh_items()
-        self._rebuild_manage()
+        self._after_group_change()
         self.SetString(ids.ID_MGR_STATUS, "Cleared ID on %d light%s" % (n, "s" if n != 1 else ""))
 
     def _auto_assign(self) -> None:
         n = light_scanner.auto_assign_all(self._doc(), self._probe, self._scene_lights)
-        self._refresh_items()
-        self._rebuild_manage()
+        self._after_group_change()
         self.SetString(ids.ID_MGR_STATUS, "Auto-assigned %d light%s" % (n, "s" if n != 1 else ""))
 
     def _mlight_select_all(self, value: bool) -> None:
         if self._use_scene:
             return
-        if value:
-            self._mlight_selected = {li.key for li in self._scene_lights}
-        else:
-            self._mlight_selected = set()
-        self._rebuild_manage()
+        self._mlight_selected = {li.key for li in self._scene_lights} if value else set()
+        self._apply_manage_values()
+        self._update_manage_status()
 
     # ================================================================ scan / build
     def _do_scan(self) -> None:
         if not self._probe.available:
             self._phase = "empty"
-            self._rebuild_body()
-            gui.MessageDialog(self._probe.diagnostics())   # tell the user WHY
+            self._show_page()
+            self._refresh_chrome()
+            gui.MessageDialog(self._probe.diagnostics())
             return
         self._scene_lights = light_scanner.get_scene_lights(self._doc(), self._probe)
         self._group_names = {}
         self._mlight_selected = set()
         self._refresh_items(reset_state=True)
         self._phase = "ready"
-        self._rebuild_body()
+        self._rebuild_manage_list()
+        self._rebuild_build_list()
+        self._show_page()
+        self._refresh_chrome()
 
     def _do_build(self) -> None:
         self._recompute_validation()
@@ -681,7 +686,7 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
 
         comp = compositor_builder.build(doc, self._probe, selected, _PLUGIN_ROOT)
         self.SetString(ids.ID_FOOT_STATUS, "✓ Built %d · %d skipped" % (built, skipped))
-        self._rebuild_list()
+        self._rebuild_build_list()
         msg = ["Built %d Render AOV%s." % (built, "s" if built != 1 else "")]
         if skipped:
             msg.append("%d pass(es) skipped (type not verified on this build)." % skipped)
