@@ -32,6 +32,8 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
     def __init__(self, mode: str = "both") -> None:
         super().__init__()
         self._mode = mode                   # "manage" | "build" | "both"
+        self._has_manage = mode in ("manage", "both")
+        self._has_build = mode in ("build", "both")
         self._probe = OctaneProbe()
         self._phase = "empty"               # empty | ready
         self._tab = "build" if mode == "build" else "manage"
@@ -66,8 +68,10 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
         self._build_tabbar()
         if self.GroupBegin(ids.ID_BODY, c4d.BFH_SCALEFIT | c4d.BFV_SCALEFIT, cols=1):
             self._build_empty_page()
-            self._build_manage_page()
-            self._build_build_page()
+            if self._has_manage:
+                self._build_manage_page()
+            if self._has_build:
+                self._build_build_page()
         self.GroupEnd()
         self._show_page()
         self._apply_values()
@@ -178,8 +182,10 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
     def _show_page(self) -> None:
         ready = self._phase == "ready"
         self.HideElement(ids.ID_EMPTY_PAGE, ready)
-        self.HideElement(ids.ID_MANAGE_PAGE, not (ready and self._tab == "manage"))
-        self.HideElement(ids.ID_BUILD_PAGE, not (ready and self._tab == "build"))
+        if self._has_manage:
+            self.HideElement(ids.ID_MANAGE_PAGE, not (ready and self._tab == "manage"))
+        if self._has_build:
+            self.HideElement(ids.ID_BUILD_PAGE, not (ready and self._tab == "build"))
         self.LayoutChanged(ids.ID_BODY)
 
     # ================================================================ list builders
@@ -316,7 +322,7 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
 
     # ================================================================ list rebuilds
     def _rebuild_manage_list(self) -> None:
-        if self._phase != "ready":
+        if not self._has_manage or self._phase != "ready":
             return
         self.LayoutFlushGroup(ids.ID_MGR_LIST)
         self._build_manage_rows()
@@ -324,7 +330,7 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
         self._apply_manage_values()
 
     def _rebuild_build_list(self) -> None:
-        if self._phase != "ready":
+        if not self._has_build or self._phase != "ready":
             return
         self.LayoutFlushGroup(ids.ID_LIST_GROUP)
         self._build_rows()
@@ -336,8 +342,10 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
     def _apply_values(self) -> None:
         if self._phase != "ready":
             return
-        self._apply_manage_values()
-        self._apply_build_values()
+        if self._has_manage:
+            self._apply_manage_values()
+        if self._has_build:
+            self._apply_build_values()
 
     def _apply_manage_values(self) -> None:
         self.SetInt32(ids.ID_MGR_IDCOMBO, self._target_id)
@@ -410,15 +418,17 @@ class OctaneLightDenoiserDialog(gui.GeDialog):
                            "Octane not detected.\n\nEnable c4doctane 2024.1+, set the renderer to "
                            "Octane in Render Settings, then re-open this panel.")
 
-        sel, err = self._counts()
-        self.Enable(ids.ID_BUILD, ready and sel > 0 and err == 0)
-        if err > 0:
-            self.SetString(ids.ID_FOOT_STATUS, "⚠ %d name%s need fixing" % (err, "s" if err > 1 else ""))
-        elif sel == 0:
-            self.SetString(ids.ID_FOOT_STATUS, "Select at least one pass to build")
-        else:
-            self.SetString(ids.ID_FOOT_STATUS, "✓ %d pass%s ready" % (sel, "es" if sel > 1 else ""))
-        self._update_manage_status()
+        if self._has_build:
+            sel, err = self._counts()
+            self.Enable(ids.ID_BUILD, ready and sel > 0 and err == 0)
+            if err > 0:
+                self.SetString(ids.ID_FOOT_STATUS, "⚠ %d name%s need fixing" % (err, "s" if err > 1 else ""))
+            elif sel == 0:
+                self.SetString(ids.ID_FOOT_STATUS, "Select at least one pass to build")
+            else:
+                self.SetString(ids.ID_FOOT_STATUS, "✓ %d pass%s ready" % (sel, "es" if sel > 1 else ""))
+        if self._has_manage:
+            self._update_manage_status()
 
     def _update_manage_status(self) -> None:
         if self._use_scene:
