@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 title Octane Light Denoiser - Installer
 
 set "SRC=%~dp0OctaneLightDenoiser"
-if not exist "%SRC%\octanelightdenoiser.pyp" (
+if not exist "%SRC%\light_denoiser.pyp" (
   echo [!] Could not find OctaneLightDenoiser next to this installer.
   pause & exit /b 1
 )
@@ -47,7 +47,7 @@ set "DEST=%TARGET%\OctaneLightDenoiser"
 if not exist "%TARGET%" mkdir "%TARGET%"
 if exist "%DEST%" rmdir /s /q "%DEST%"
 xcopy /e /i /y /q "%SRC%" "%DEST%" >nul
-if exist "%DEST%\octanelightdenoiser.pyp" (
+if exist "%DEST%\light_denoiser.pyp" (
   echo  installed -^> %TARGET%
   set /a COUNT+=1
 ) else (

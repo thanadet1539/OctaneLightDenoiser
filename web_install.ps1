@@ -21,7 +21,7 @@ try {
     Expand-Archive $zip -DestinationPath $tmp -Force
 
     $src = Get-ChildItem $tmp -Directory | Where-Object {
-        Test-Path (Join-Path $_.FullName 'OctaneLightDenoiser\octanelightdenoiser.pyp')
+        Test-Path (Join-Path $_.FullName 'OctaneLightDenoiser\light_denoiser.pyp')
     } | Select-Object -First 1
     if (-not $src) { Write-Host "[!] Plugin not found in the downloaded archive."; return }
     $plugin = Join-Path $src.FullName 'OctaneLightDenoiser'

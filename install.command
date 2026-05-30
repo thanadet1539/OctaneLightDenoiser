@@ -10,7 +10,7 @@ echo "============================================================"
 echo "  Octane Light Denoiser - Installer (macOS)"
 echo "============================================================"
 
-if [ ! -f "$SRC/octanelightdenoiser.pyp" ]; then
+if [ ! -f "$SRC/light_denoiser.pyp" ]; then
   echo "[!] OctaneLightDenoiser folder not found next to this script."
   exit 1
 fi
